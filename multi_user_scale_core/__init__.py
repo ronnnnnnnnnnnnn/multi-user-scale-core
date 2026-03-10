@@ -1,6 +1,6 @@
 """Core weight routing primitives shared across integrations."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .errors import (
     DuplicateMeasurementError,
