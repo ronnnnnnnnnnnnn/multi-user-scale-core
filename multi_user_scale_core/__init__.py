@@ -1,5 +1,7 @@
 """Core weight routing primitives shared across integrations."""
 
+__version__ = "0.1.0"
+
 from .errors import (
     DuplicateMeasurementError,
     MeasurementNotFoundError,
@@ -17,10 +19,8 @@ from .router import WeightRouter
 from .tolerance import (
     MIN_MEASUREMENTS_FOR_ADAPTIVE,
     MIN_TOLERANCE_KG,
-    MAX_TOLERANCE_KG,
     DEFAULT_TOLERANCE_PERCENTAGE,
     REFERENCE_WINDOW_DAYS,
-    TOLERANCE_MULTIPLIER,
     VARIANCE_WINDOW_DAYS,
 )
 
@@ -30,13 +30,11 @@ __all__ = [
     "MeasurementCandidate",
     "MeasurementNotFoundError",
     "MeasurementValidationError",
-    "MAX_TOLERANCE_KG",
     "MIN_TOLERANCE_KG",
     "MIN_MEASUREMENTS_FOR_ADAPTIVE",
     "REFERENCE_WINDOW_DAYS",
     "RouterConfig",
     "RouterError",
-    "TOLERANCE_MULTIPLIER",
     "UserNotFoundError",
     "VARIANCE_WINDOW_DAYS",
     "WeightMeasurement",

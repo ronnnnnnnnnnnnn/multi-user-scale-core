@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from math import sqrt
 from statistics import pstdev
 from typing import Iterable
@@ -51,7 +51,7 @@ def _limit_measurements_per_day(
     if len(measurements) <= max_per_day:
         return measurements
 
-    by_day: dict[datetime.date, list[WeightMeasurement]] = defaultdict(list)
+    by_day: dict[date, list[WeightMeasurement]] = defaultdict(list)
     for measurement in measurements:
         by_day[measurement.timestamp.date()].append(measurement)
 
@@ -84,8 +84,7 @@ def calculate_reference_weight(
 
     samples = _filtered_measurements(all_measurements, reference_time, window_days)
     if not samples:
-        # Fallback to the most recent measurement when window is empty.
-        # This mirrors the Etekcity behavior when recent history is unavailable.
+        # Fallback to the most recent measurement when the window is empty.
         latest = max(all_measurements, key=lambda sample: sample.timestamp)
         return latest.weight_kg
 
@@ -150,16 +149,17 @@ def calculate_final_tolerance(
     *,
     tolerance_percentage: float = DEFAULT_TOLERANCE_PERCENTAGE,
     min_tolerance_kg: float = MIN_TOLERANCE_KG,
-    max_tolerance_kg: float = MAX_TOLERANCE_KG,
     min_measurements_for_adaptive: int = MIN_MEASUREMENTS_FOR_ADAPTIVE,
     variance_window_days: int = VARIANCE_WINDOW_DAYS,
 ) -> float:
+    measurement_list = list(measurements)
+
     base = calculate_base_tolerance(
         reference_weight,
         tolerance_percentage=tolerance_percentage,
     )
     adaptive = calculate_variance_tolerance(
-        measurements=measurements,
+        measurements=measurement_list,
         reference_weight=reference_weight,
         base_tolerance=base,
         reference_time=reference_time,
@@ -167,7 +167,6 @@ def calculate_final_tolerance(
         min_measurements_for_adaptive=min_measurements_for_adaptive,
     )
 
-    measurement_list = list(measurements)
     if not measurement_list:
         latest = reference_time
     else:
@@ -179,7 +178,5 @@ def calculate_final_tolerance(
     recency_multiplier = min(recency_multiplier, RECENCY_SCALING_MAX)
     final = adaptive * recency_multiplier
 
-    # Preserve Etekcity-style behavior by only enforcing a minimum tolerance.
-    # Upper tolerance is intentionally left unbounded by max_tolerance_kg here
-    # to match the source algorithm.
+    # Only enforce a minimum tolerance floor; do not cap the upper bound.
     return max(min_tolerance_kg, final)

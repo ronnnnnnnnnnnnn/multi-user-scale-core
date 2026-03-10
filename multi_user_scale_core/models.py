@@ -83,7 +83,6 @@ class RouterConfig:
     max_history_size: int = 100
     tolerance_percentage: float = 0.04
     min_tolerance_kg: float = 1.5
-    max_tolerance_kg: float = 5.0
     variance_window_days: int = 30
     reference_window_days: int = 7
     min_measurements_for_adaptive: int = 5
@@ -99,12 +98,15 @@ class RouterConfig:
         for field_name, value in int_fields.items():
             if not isinstance(value, int) or isinstance(value, bool):
                 raise TypeError(f"Invalid integer for {field_name}: {value!r}")
+            if value < 1:
+                raise ValueError(f"{field_name} must be at least 1, got {value!r}")
 
         float_fields = {
             "tolerance_percentage": self.tolerance_percentage,
             "min_tolerance_kg": self.min_tolerance_kg,
-            "max_tolerance_kg": self.max_tolerance_kg,
         }
         for field_name, value in float_fields.items():
             if not isinstance(value, (int, float)) or isinstance(value, bool):
                 raise TypeError(f"Invalid float for {field_name}: {value!r}")
+            if value <= 0:
+                raise ValueError(f"{field_name} must be positive, got {value!r}")

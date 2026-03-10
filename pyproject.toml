@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=61,<77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -19,7 +19,12 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
+
+[project.urls]
+Repository = "https://github.com/ronnnnnnnnnnnnn/multi-user-scale-core"
+"Bug Tracker" = "https://github.com/ronnnnnnnnnnnnn/multi-user-scale-core/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
@@ -27,6 +32,9 @@ dev = ["pytest>=7"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["multi_user_scale_core*"]
+
+[tool.setuptools.package-data]
+multi_user_scale_core = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

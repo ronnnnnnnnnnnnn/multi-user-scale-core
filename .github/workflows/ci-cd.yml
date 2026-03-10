@@ -1,0 +1,175 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (leave empty to use version from pyproject.toml)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pytest
+          pip install .
+      - name: Lint with flake8
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      - name: Run tests
+        run: pytest tests/
+
+  publish:
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Clean up dist folder
+        run: rm -rf dist/
+      - name: Install package and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          pip install build twine
+      - name: Extract version and update if necessary
+        id: extract_version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git pull origin main
+            sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+            sed -i "s/__version__ = .*/__version__ = \"$VERSION\"/" multi_user_scale_core/__init__.py
+            git add pyproject.toml multi_user_scale_core/__init__.py
+            git commit -m "Bump version to $VERSION"
+            git push
+          else
+            VERSION=$(python -c "import importlib.metadata; print(importlib.metadata.version('multi-user-scale-core'))")
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+          fi
+          # Check if this is a pre-release (alpha, beta, rc)
+          if [[ "$VERSION" =~ (alpha|beta|rc) ]]; then
+            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+          else
+            echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+          fi
+      - name: Build package
+        run: python -m build
+      - name: Create or Update GitHub Release
+        id: create_release
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs').promises;
+            const path = require('path');
+
+            try {
+              // Check if the release already exists
+              const { data: existingRelease } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: `v${process.env.VERSION}`
+              });
+
+              console.log(`Release for v${process.env.VERSION} already exists. Updating it.`);
+
+              const { data: updatedRelease } = await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: existingRelease.id,
+                name: `Release v${process.env.VERSION}`,
+                body: `Updated release for v${process.env.VERSION}`,
+                prerelease: process.env.IS_PRERELEASE === 'true'
+              });
+
+              core.setOutput('release_id', updatedRelease.id);
+            } catch (error) {
+              if (error.status === 404) {
+                console.log(`Release for v${process.env.VERSION} does not exist. Creating a new one.`);
+
+                const { data: newRelease } = await github.rest.repos.createRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag_name: `v${process.env.VERSION}`,
+                  name: `Release v${process.env.VERSION}`,
+                  body: `Release for v${process.env.VERSION}`,
+                  draft: false,
+                  prerelease: process.env.IS_PRERELEASE === 'true'
+                });
+
+                core.setOutput('release_id', newRelease.id);
+              } else {
+                throw error;
+              }
+            }
+      - name: Upload to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          twine upload dist/*
+      - name: Wait for PyPI
+        run: |
+          echo "Waiting for package to be available on PyPI..."
+          sleep 120
+      - name: Verify installation from PyPI
+        run: |
+          python -m venv test-env
+          . test-env/bin/activate
+          pip install multi-user-scale-core==$VERSION
+          python -c "from multi_user_scale_core import WeightRouter, RouterConfig, UserProfile, WeightMeasurement; print('Import successful:', WeightRouter)"
+      - name: Upload Release Assets
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs').promises;
+            const path = require('path');
+
+            const files = await fs.readdir('dist');
+            for (const file of files) {
+              const filePath = path.join('dist', file);
+              const stats = await fs.stat(filePath);
+              if (stats.isFile()) {
+                console.log(`Uploading ${file}...`);
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: ${{ steps.create_release.outputs.release_id }},
+                  name: file,
+                  data: await fs.readFile(filePath)
+                });
+              }
+            }

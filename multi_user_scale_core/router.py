@@ -5,6 +5,8 @@ from __future__ import annotations
 from bisect import bisect_left
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+import math
+from collections.abc import Callable
 from typing import Any
 
 from .errors import (
@@ -23,10 +25,11 @@ class WeightRouter:
     def __init__(
         self,
         config: RouterConfig | None = None,
-        now_provider=lambda: datetime.now(tz=timezone.utc),
+        now_provider: Callable[[], datetime] = lambda: datetime.now(tz=timezone.utc),
     ) -> None:
         self._config = config or RouterConfig()
         self._history: dict[str, list[WeightMeasurement]] = {}
+        self._measurement_ids: set[str] = set()
         self._users: dict[str, UserProfile] = {}
         self._now = now_provider
 
@@ -47,10 +50,18 @@ class WeightRouter:
         return list(self._users.values())
 
     def set_users(self, users: list[UserProfile]) -> None:
+        """Replace the full set of tracked users.
+
+        Any committed history for users not present in the new list is
+        permanently discarded. Callers should persist router state via
+        ``to_dict`` before invoking this method if that history may be needed.
+        """
         self._users = {user.user_id: user for user in users}
         for user_id in list(self._history):
             if user_id not in self._users:
-                self._history.pop(user_id, None)
+                dropped = self._history.pop(user_id)
+                for m in dropped:
+                    self._measurement_ids.discard(m.measurement_id)
 
     def _prune_history(self, user_id: str, reference_time: datetime) -> None:
         history = self._history.setdefault(user_id, [])
@@ -60,6 +71,11 @@ class WeightRouter:
         ]
         if len(pruned_history) > self._config.max_history_size:
             pruned_history = pruned_history[-self._config.max_history_size :]
+        if len(pruned_history) != len(history):
+            kept_ids = {m.measurement_id for m in pruned_history}
+            self._measurement_ids -= {
+                m.measurement_id for m in history if m.measurement_id not in kept_ids
+            }
         self._history[user_id] = pruned_history
 
     def _prune_all_histories(self, reference_time: datetime) -> None:
@@ -69,16 +85,15 @@ class WeightRouter:
     def _ensure_valid_weight(self, measurement: WeightMeasurement) -> None:
         if not isinstance(measurement.weight_kg, (int, float)):
             raise MeasurementValidationError("Weight is not a number")
+        if not math.isfinite(measurement.weight_kg):
+            raise MeasurementValidationError("Weight must be a finite number")
 
     def _ensure_user_exists(self, user_id: str, message: str) -> None:
         if user_id not in self._users:
             raise UserNotFoundError(message)
 
     def _measurement_exists(self, measurement_id: str) -> bool:
-        for history in self._history.values():
-            if any(sample.measurement_id == measurement_id for sample in history):
-                return True
-        return False
+        return measurement_id in self._measurement_ids
 
     def _insert_measurement(self, user_id: str, measurement: WeightMeasurement) -> None:
         history = self._history.setdefault(user_id, [])
@@ -131,7 +146,6 @@ class WeightRouter:
                 reference_time=measurement.timestamp,
                 tolerance_percentage=self._config.tolerance_percentage,
                 min_tolerance_kg=self._config.min_tolerance_kg,
-                max_tolerance_kg=self._config.max_tolerance_kg,
                 min_measurements_for_adaptive=self._config.min_measurements_for_adaptive,
                 variance_window_days=self._config.variance_window_days,
             )
@@ -163,6 +177,7 @@ class WeightRouter:
             )
 
         self._insert_measurement(user_id, measurement)
+        self._measurement_ids.add(measurement.measurement_id)
         self._prune_history(user_id, measurement.timestamp)
         return measurement
 
@@ -192,7 +207,7 @@ class WeightRouter:
 
         index, measurement = self._select_measurement(user_id, measurement_id)
         self._history.setdefault(user_id, []).pop(index)
-        self._prune_history(user_id, self._now())
+        self._measurement_ids.discard(measurement.measurement_id)
         return measurement
 
     def get_user_history(self, user_id: str) -> list[WeightMeasurement]:
@@ -207,6 +222,12 @@ class WeightRouter:
         return history[-1]
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialise router state to a plain dictionary.
+
+        The ``"now"`` field is a snapshot timestamp recorded for human
+        inspection only.  It is **not** consumed by :meth:`from_dict` and
+        has no effect on restoration.
+        """
         return {
             "config": asdict(self._config),
             "users": [profile.to_dict() for profile in self._users.values()],
@@ -219,7 +240,11 @@ class WeightRouter:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "WeightRouter":
+    def from_dict(
+        cls,
+        payload: dict[str, Any],
+        now_provider: Callable[[], datetime] = lambda: datetime.now(tz=timezone.utc),
+    ) -> "WeightRouter":
         if not isinstance(payload, dict):
             raise TypeError("Payload must be a dictionary")
 
@@ -229,9 +254,11 @@ class WeightRouter:
 
         allowed_config_keys = set(RouterConfig.__dataclass_fields__)
         filtered_config = {
-            key: value for key, value in config_payload.items() if key in allowed_config_keys
+            key: value
+            for key, value in config_payload.items()
+            if key in allowed_config_keys
         }
-        router = cls(config=RouterConfig(**filtered_config))
+        router = cls(config=RouterConfig(**filtered_config), now_provider=now_provider)
 
         users_payload = payload.get("users", [])
         if not isinstance(users_payload, list):
@@ -244,10 +271,18 @@ class WeightRouter:
 
         seen_measurement_ids: set[str] = set()
         for user_id, values in history_payload.items():
+            if not isinstance(user_id, str):
+                raise TypeError("History keys must be user IDs as strings")
+            if user_id not in router._users:
+                raise ValueError(
+                    f"History payload contains user_id '{user_id}' that is not configured"
+                )
             if not isinstance(values, list):
                 raise TypeError("History measurements must be a list")
 
-            restored_history = [WeightMeasurement.from_dict(sample) for sample in values]
+            restored_history = [
+                WeightMeasurement.from_dict(sample) for sample in values
+            ]
             for measurement in restored_history:
                 if measurement.measurement_id in seen_measurement_ids:
                     raise ValueError("Duplicate measurement_id in router history")
@@ -256,4 +291,5 @@ class WeightRouter:
                 restored_history, key=lambda sample: sample.timestamp
             )
 
+        router._measurement_ids = seen_measurement_ids
         return router
