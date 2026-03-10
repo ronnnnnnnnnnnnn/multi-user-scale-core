@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/multi-user-scale-core.svg)](https://pypi.org/project/multi-user-scale-core/)
 
-Some smart scale apps can't tell who's standing on the scale. This library solves the routing problem: given an incoming weight measurement and a set of users with history, it returns a ranked list of likely owners. Pure Python, no runtime dependencies. Fully typed (PEP 561).
+Smart scales have no way to identify who's standing on them. This library solves that: given a weight reading and a set of users with history, it returns a ranked list of likely owners. Pure Python, no runtime dependencies. Fully typed (PEP 561).
 
 ## Features
 
@@ -119,6 +119,7 @@ Default tolerance constants are exported for convenience:
 from multi_user_scale_core import (
     DEFAULT_TOLERANCE_PERCENTAGE,  # 0.04
     MIN_TOLERANCE_KG,              # 1.5
+    MAX_TOLERANCE_KG,              # 5.0
     MIN_MEASUREMENTS_FOR_ADAPTIVE, # 5
     REFERENCE_WINDOW_DAYS,         # 7
     VARIANCE_WINDOW_DAYS,          # 30

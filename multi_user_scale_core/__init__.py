@@ -17,9 +17,10 @@ from .models import (
 )
 from .router import WeightRouter
 from .tolerance import (
+    DEFAULT_TOLERANCE_PERCENTAGE,
+    MAX_TOLERANCE_KG,
     MIN_MEASUREMENTS_FOR_ADAPTIVE,
     MIN_TOLERANCE_KG,
-    DEFAULT_TOLERANCE_PERCENTAGE,
     REFERENCE_WINDOW_DAYS,
     VARIANCE_WINDOW_DAYS,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "MeasurementCandidate",
     "MeasurementNotFoundError",
     "MeasurementValidationError",
+    "MAX_TOLERANCE_KG",
     "MIN_TOLERANCE_KG",
     "MIN_MEASUREMENTS_FOR_ADAPTIVE",
     "REFERENCE_WINDOW_DAYS",
