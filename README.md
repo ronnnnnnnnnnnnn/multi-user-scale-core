@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/multi-user-scale-core.svg)](https://pypi.org/project/multi-user-scale-core/)
 
-Not every smart scale integration surfaces who's standing on the scale. This library solves that: given a weight reading and a set of users with history, it returns a ranked list of likely owners. Pure Python, no runtime dependencies. Fully typed (PEP 561).
+Not every smart scale app or integration surfaces who's standing on the scale. This library solves that: given a weight reading and a set of users with history, it returns a ranked list of likely owners. Pure Python, no runtime dependencies. Fully typed (PEP 561).
 
 ## Features
 
