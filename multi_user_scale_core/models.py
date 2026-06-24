@@ -86,6 +86,8 @@ class RouterConfig:
     variance_window_days: int = 30
     reference_window_days: int = 7
     min_measurements_for_adaptive: int = 5
+    enable_pruning: bool = True
+    prune_margin_kg: float = 3.0
 
     def __post_init__(self) -> None:
         int_fields = {
@@ -104,9 +106,17 @@ class RouterConfig:
         float_fields = {
             "tolerance_percentage": self.tolerance_percentage,
             "min_tolerance_kg": self.min_tolerance_kg,
+            "prune_margin_kg": self.prune_margin_kg,
         }
         for field_name, value in float_fields.items():
             if not isinstance(value, (int, float)) or isinstance(value, bool):
                 raise TypeError(f"Invalid float for {field_name}: {value!r}")
             if value <= 0:
                 raise ValueError(f"{field_name} must be positive, got {value!r}")
+
+        bool_fields = {
+            "enable_pruning": self.enable_pruning,
+        }
+        for field_name, value in bool_fields.items():
+            if not isinstance(value, bool):
+                raise TypeError(f"Invalid bool for {field_name}: {value!r}")

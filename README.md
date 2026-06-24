@@ -6,8 +6,9 @@ Not every smart scale app or integration surfaces who's standing on the scale. T
 
 ## Features
 
-- **WeightRouter**: Route incoming weight measurements to users using adaptive tolerance.
+- **WeightRouter**: Route incoming weight measurements to users using adaptive tolerance and competitive pruning.
 - **Adaptive tolerance**: Exponentially-weighted reference weight, variance-based tolerance, and recency scaling that automatically widens the window when a user hasn't weighed in recently.
+- **Dormant User Retention**: Users inactive past the retention window retain their baseline for future matching with an expanded tolerance margin.
 - **Persistence**: `to_dict()` / `from_dict()` for saving and restoring router state across restarts.
 - **Models**: `WeightMeasurement`, `UserProfile`, `RouterConfig`, `MeasurementCandidate`.
 
@@ -103,13 +104,15 @@ router = WeightRouter.from_dict(payload, now_provider=lambda: my_fixed_time)
 
 ```python
 config = RouterConfig(
-    history_retention_days=90,       # drop measurements older than this
+    history_retention_days=90,       # drop measurements older than this (retaining the most recent 1)
     max_history_size=100,            # cap per-user history length
     tolerance_percentage=0.04,       # base tolerance as fraction of body weight
     min_tolerance_kg=1.5,            # floor on tolerance regardless of body weight
     variance_window_days=30,         # window for variance-based adaptive tolerance
     reference_window_days=7,         # window for computing the reference weight
     min_measurements_for_adaptive=5, # minimum history needed for variance adaptation
+    enable_pruning=True,             # drop candidates significantly worse than the best match
+    prune_margin_kg=3.0,             # margin above the best match to start pruning
 )
 ```
 

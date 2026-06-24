@@ -92,6 +92,57 @@ def test_evaluate_closest_match_is_first() -> None:
     assert candidates[1].user_id == "bob"
 
 
+def test_evaluate_prunes_inferior_matches() -> None:
+    router = _router("alice", "bob")
+    # Alice has 99.0 kg, Bob has 92.0 kg
+    for i, w in enumerate([99.0, 99.2, 98.8, 99.1, 99.0]):
+        router.record_measurement_for_user("alice", _m(f"a{i}", w, 5 - i))
+    for i, w in enumerate([92.0, 92.1, 91.9, 92.0, 92.2]):
+        router.record_measurement_for_user("bob", _m(f"b{i}", w, 5 - i))
+
+    # To trigger the bug, Bob needs to not have weighed in recently,
+    # so his tolerance expands to > 5.5 kg.
+    # We recorded Bob's measurements 1-5 days ago. 
+    # Wait, 5 days ago is not enough to expand the tolerance to 5.5 kg.
+    # Let's just simulate the distance: 
+    # Alex distance: 1.0 kg (from 99.0 to 98.0)
+    # Bob distance: 6.0 kg (from 92.0 to 98.0)
+    # If Bob's tolerance somehow allowed 6.0 kg, Bob would be included.
+    # We don't even need to trigger the expanded tolerance if we just test
+    # the pruning logic against a case where two candidates are returned by distance.
+    # Oh wait, if the tolerance doesn't allow it, Bob won't even make it to the candidate list.
+    # Let's just manually set Bob's measurements to 30 days ago to expand tolerance
+    router = _router("alice", "bob")
+    for i, w in enumerate([99.0, 99.2, 98.8, 99.1, 99.0]):
+        router.record_measurement_for_user("alice", _m(f"a{i}", w, 5 - i))
+    for i, w in enumerate([92.0, 92.1, 91.9, 92.2]):
+        router.record_measurement_for_user("bob", _m(f"b{i}", w, 60 - i))
+
+    # Bob's distance is |98.0 - 92.0| = 6.0 kg.
+    # Base tolerance for 92kg is ~3.68kg.
+    # Recency multiplier for 25 days is 1.0 + (0.15 * 5) = 1.75.
+    # Tolerance = 3.68 * 1.75 = 6.44 kg.
+    # So 6.0 kg is within Bob's tolerance! Bob WOULD be included without pruning.
+    
+    # Alice's distance is |98.0 - 99.0| = 1.0 kg.
+    # Alice's tolerance is ~3.96kg.
+    
+    # Best distance is 1.0. Margin is 3.0 (default prune_margin_kg). Prune threshold is 4.0.
+    # Bob's distance is 6.0 > 4.0, so Bob should be pruned.
+    
+    candidates = router.evaluate_measurement(_m("incoming", 98.0, 0))
+
+    assert len(candidates) == 1
+    assert candidates[0].user_id == "alice"
+
+    # Now verify that setting enable_pruning=False returns both candidates
+    router.set_config(RouterConfig(enable_pruning=False))
+    candidates_no_pruning = router.evaluate_measurement(_m("incoming", 98.0, 0))
+    assert len(candidates_no_pruning) == 2
+    assert candidates_no_pruning[0].user_id == "alice"
+    assert candidates_no_pruning[1].user_id == "bob"
+
+
 def test_evaluate_out_of_tolerance_not_returned() -> None:
     router = _router("alice")
     for i, w in enumerate([75.0, 75.2, 74.9, 75.1, 75.0]):
@@ -336,12 +387,32 @@ def test_history_retention_prunes_on_record() -> None:
         now_provider=lambda: _FIXED,
     )
     router.set_users([UserProfile(user_id="alice", display_name="Alice")])
+    router.record_measurement_for_user("alice", _m("older", 75.0, 50))
     router.record_measurement_for_user("alice", _m("old", 75.0, 40))
     router.record_measurement_for_user("alice", _m("recent", 75.5, 1))
 
     history = router.get_user_history("alice")
     assert len(history) == 1
     assert history[0].measurement_id == "recent"
+
+
+def test_history_retention_retains_last_measurement() -> None:
+    router = WeightRouter(
+        config=RouterConfig(history_retention_days=30),
+        now_provider=lambda: _FIXED,
+    )
+    router.set_users([UserProfile(user_id="alice", display_name="Alice")])
+    router.record_measurement_for_user("alice", _m("very_old", 75.0, 60))
+    router.record_measurement_for_user("alice", _m("old", 75.5, 40))
+
+    # Trigger a pruning run using the current time
+    router.evaluate_measurement(_m("incoming", 75.0, 0))
+
+    # Even though both are > 30 days old relative to the incoming measurement (now),
+    # the most recent one ("old") should be retained.
+    history = router.get_user_history("alice")
+    assert len(history) == 1
+    assert history[0].measurement_id == "old"
 
 
 def test_max_history_size_evicts_oldest() -> None:

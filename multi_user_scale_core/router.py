@@ -69,6 +69,10 @@ class WeightRouter:
         pruned_history = [
             measurement for measurement in history if measurement.timestamp >= cutoff
         ]
+        
+        if not pruned_history and history:
+            pruned_history = [history[-1]]
+            
         if len(pruned_history) > self._config.max_history_size:
             pruned_history = pruned_history[-self._config.max_history_size :]
         if len(pruned_history) != len(history):
@@ -163,6 +167,16 @@ class WeightRouter:
                 )
 
         weighted_candidates.sort(key=lambda item: item[0])
+
+        if self._config.enable_pruning and weighted_candidates:
+            best_distance = weighted_candidates[0][0]
+            margin = self._config.prune_margin_kg
+            weighted_candidates = [
+                item
+                for item in weighted_candidates
+                if item[0] <= best_distance + margin
+            ]
+
         ordered_matches = [candidate for _, candidate in weighted_candidates]
         return ordered_matches + no_history_candidates
 
